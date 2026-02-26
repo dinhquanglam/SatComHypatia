@@ -85,7 +85,7 @@ SatellitePositionHelper::GetStartTime (void) const
 std::string
 SatellitePositionHelper::GetSatelliteName (void) const
 {
-  return (!m_sat ? m_sat->GetName () : "");
+  return (m_sat ? m_sat->GetName () : "");
 }
 
 void

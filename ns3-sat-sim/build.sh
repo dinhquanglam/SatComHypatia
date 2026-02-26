@@ -42,3 +42,7 @@ fi
 
 # Perform the build
 ./waf -j4 || exit 1
+
+# Apply the patch
+echo "Applying patch"
+patch -p1 -d simulator < simulator/patch.diff || exit 1
