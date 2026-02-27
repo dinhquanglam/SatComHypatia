@@ -241,12 +241,15 @@ def write_viz_files():
     """
     writer_html = open(OUT_HTML_FILE, 'w')
     with open(topFile, 'r') as fi:
-        writer_html.write(fi.read())
+        top_content = fi.read()
+        writer_html.write(top_content)
+        if not top_content.endswith("\n"):
+            writer_html.write("\n")
     writer_html.write(viz_string)
     with open(bottomFile, 'r') as fb:
         writer_html.write(fb.read())
     writer_html.close()
 
 
-viz_string = generate_satelite_trajectories()
+viz_string = generate_satellite_trajectories()
 write_viz_files()
