@@ -20,9 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import json
 import math
-import ephem
-import pandas as pd
 
 try:
     from . import util
@@ -101,122 +100,229 @@ city_details = {}
 paths_over_time = []
 
 
+def _read_path_schedule(path_filename):
+    """
+    Reads path transition events and converts transition time from ns to ms.
+    """
+    schedule = []
+    lines = [line.rstrip('\n') for line in open(path_filename) if line.strip()]
+    for line in lines:
+        val = line.split(",")
+        start_ms = int(round(int(val[0]) / 1000000))
+        nodes = [int(x) for x in val[1].split("-")]
+        schedule.append((start_ms, nodes))
+    schedule.sort(key=lambda x: x[0])
+    if not schedule:
+        raise ValueError("Path file is empty: " + path_filename)
+    return schedule
+
+
+def _selected_path_nodes(path_schedule, sel_time_ms):
+    """
+    Returns the active path at a specific millisecond.
+    """
+    sel_path = path_schedule[0][1]
+    for i in range(len(path_schedule)):
+        start_ms = path_schedule[i][0]
+        start_next_ms = path_schedule[i + 1][0] if i + 1 < len(path_schedule) else 99999999999
+        if sel_time_ms >= start_ms and sel_time_ms < start_next_ms:
+            sel_path = path_schedule[i][1]
+            break
+    return sel_path
+
+
+def _satellite_js_payload():
+    """
+    Builds per-satellite metadata required for JS-side orbit propagation.
+    """
+    sat_init = []
+    sat_meta = []
+    for sat in sat_objs:
+        sat["sat_obj"].compute(EPOCH)
+        sat_init.append({
+            "lon_deg": math.degrees(sat["sat_obj"].sublong),
+            "lat_deg": math.degrees(sat["sat_obj"].sublat),
+            "alt_m": sat["alt_km"] * 1000
+        })
+
+        orb_id = sat["orb_id"]
+        orb_sat_id = sat["orb_sat_id"]
+        orbit_shift = 0.0
+        if PHASE_DIFF and orb_id % 2 == 1:
+            orbit_shift = 360.0 / (NUM_SATS_PER_ORB * 2.0)
+        mean_anomaly_deg_0 = orbit_shift + (orb_sat_id * 360.0 / NUM_SATS_PER_ORB)
+        raan_deg = orb_id * 360.0 / NUM_ORBS
+
+        sat_meta.append({
+            "raan_deg": raan_deg,
+            "inc_deg": INCLINATION_DEGREE,
+            "m0_deg": mean_anomaly_deg_0,
+            "mean_motion_rev_per_day": MEAN_MOTION_REV_PER_DAY,
+            "alt_m": ALTITUDE_M
+        })
+
+    return sat_init, sat_meta
+
+
 def generate_path_at_time():
     """
-    Generates end-to-end path at specified time
+    Generates a dynamic end-to-end path visualization:
+    - Satellites follow physical orbital propagation over time
+    - End-to-end path switches according to networkx_path_*.txt events
     :return: HTML formatted string for visualization
     """
-    viz_string = ""
-    global src_GS
-    global dst_GS
+    viz_parts = []
     global paths_over_time
     global OUT_HTML_FILE
-    lines = [line.rstrip('\n') for line in open(path_file)]
-    for i in range(len(lines)):
-        val = lines[i].split(",")
-        nodes = val[1].split("-")
-        paths_over_time.append((int(val[0]), nodes))
-    paths_over_time.append((0, nodes))
-    SEL_PATH_TIME = 0
-    SEL_PATH = []
-    for i in range(len(paths_over_time)):
-        start_ms = round((paths_over_time[i][0]) / 1000000)
-        start_next = 99999999999
-        try:
-            start_next = round((paths_over_time[i + 1][0]) / 1000000)
-        except:
-            None
-        print(start_ms, GEN_TIME)
-        if GEN_TIME >= start_ms and GEN_TIME < start_next:
-            SEL_PATH_TIME = paths_over_time[i][0]
-            SEL_PATH = paths_over_time[i][1]
-            break
-    print(SEL_PATH_TIME, SEL_PATH)
+    paths_over_time = _read_path_schedule(path_file)
+    sel_path = _selected_path_nodes(paths_over_time, GEN_TIME)
 
-    shifted_epoch = (pd.to_datetime(EPOCH) + pd.to_timedelta(GEN_TIME, unit='ms')).strftime(format='%Y/%m/%d %H:%M:%S.%f')
-    print(shifted_epoch)
+    num_sats = NUM_ORBS * NUM_SATS_PER_ORB
+    sim_start_ms = min(paths_over_time[0][0], GEN_TIME)
+    sim_end_ms = max(paths_over_time[-1][0] + 1000, GEN_TIME + 1000)
 
-    for i in range(len(sat_objs)):
-        sat_objs[i]["sat_obj"].compute(shifted_epoch)
-        viz_string += "var redSphere = viewer.entities.add({name : '', position: Cesium.Cartesian3.fromDegrees(" \
-                     + str(math.degrees(sat_objs[i]["sat_obj"].sublong)) + ", " \
-                     + str(math.degrees(sat_objs[i]["sat_obj"].sublat)) + ", "+str(sat_objs[i]["alt_km"]*1000)+"), "\
-                     + "ellipsoid : {radii : new Cesium.Cartesian3(20000.0, 20000.0, 20000.0), "\
-                     + "material : Cesium.Color.BLACK.withAlpha(1),}});\n"
-
-    orbit_links = util.find_orbit_links(sat_objs, NUM_ORBS, NUM_SATS_PER_ORB)
-    for key in orbit_links:
-        sat1 = orbit_links[key]["sat1"]
-        sat2 = orbit_links[key]["sat2"]
-        viz_string += "viewer.entities.add({name : '', polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([" \
-                      + str(math.degrees(sat_objs[sat1]["sat_obj"].sublong)) + "," \
-                      + str(math.degrees(sat_objs[sat1]["sat_obj"].sublat)) + "," \
-                      + str(sat_objs[sat1]["alt_km"] * 1000) + "," \
-                      + str(math.degrees(sat_objs[sat2]["sat_obj"].sublong)) + "," \
-                      + str(math.degrees(sat_objs[sat2]["sat_obj"].sublat)) + "," \
-                      + str(sat_objs[sat2]["alt_km"] * 1000) + "]), " \
-                      + "width: 0.5, arcType: Cesium.ArcType.NONE, " \
-                      + "material: new Cesium.PolylineOutlineMaterialProperty({ " \
-                      + "color: Cesium.Color.GREY.withAlpha(0.3), outlineWidth: 0, outlineColor: Cesium.Color.BLACK})}});"
-
-    for p in range(len(SEL_PATH)):
-        if p == 0:
-            GS = int(SEL_PATH[p]) - NUM_ORBS*NUM_SATS_PER_ORB
-            print(city_details[GS]["name"])
-            OUT_HTML_FILE += "_"+city_details[GS]["name"] + "_" +str(SEL_PATH[p])
-            viz_string += "var redSphere = viewer.entities.add({name : '', position: Cesium.Cartesian3.fromDegrees(" \
-                          + str(city_details[GS]["long_deg"]) + ", " \
-                          + str(city_details[GS]["lat_deg"]) + ", " \
-                          + str(city_details[GS]["alt_km"] * 1000) + "), " \
-                          + "ellipsoid : {radii : new Cesium.Cartesian3(50000.0, 50000.0, 50000.0), " \
-                          + "material : Cesium.Color.GREEN.withAlpha(1),}});\n"
-            dst = int(SEL_PATH[p + 1])
-            viz_string += "viewer.entities.add({name : '', polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([" \
-                          + str(city_details[GS]["long_deg"]) + "," \
-                          + str(city_details[GS]["lat_deg"]) + "," \
-                          + str(city_details[GS]["alt_km"] * 1000) + "," \
-                          + str(math.degrees(sat_objs[dst]["sat_obj"].sublong)) + "," \
-                          + str(math.degrees(sat_objs[dst]["sat_obj"].sublat)) + "," \
-                          + str(sat_objs[dst]["alt_km"] * 1000) + "]), " \
-                          + "width: 3.0, arcType: Cesium.ArcType.NONE, " \
-                          + "material: new Cesium.PolylineOutlineMaterialProperty({ " \
-                          + "color: Cesium.Color.RED.withAlpha(1.0), outlineWidth: 0, outlineColor: Cesium.Color.BLACK})}});"
-        if p == len(SEL_PATH) - 1:
-            GS = int(SEL_PATH[p]) - NUM_ORBS * NUM_SATS_PER_ORB
-            print(city_details[GS]["name"])
-            OUT_HTML_FILE += "_" + city_details[GS]["name"] + "_" + str(SEL_PATH[p])
-            viz_string += "var redSphere = viewer.entities.add({name : '', position: Cesium.Cartesian3.fromDegrees(" \
-                          + str(city_details[GS]["long_deg"]) + ", " \
-                          + str(city_details[GS]["lat_deg"]) + ", " \
-                          + str(city_details[GS]["alt_km"] * 1000) + "), " \
-                          + "ellipsoid : {radii : new Cesium.Cartesian3(50000.0, 50000.0, 50000.0), " \
-                          + "material : Cesium.Color.GREEN.withAlpha(1),}});\n"
-            src = int(SEL_PATH[p-1])
-            viz_string += "viewer.entities.add({name : '', polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([" \
-                          + str(city_details[GS]["long_deg"]) + "," \
-                          + str(city_details[GS]["lat_deg"]) + "," \
-                          + str(city_details[GS]["alt_km"] * 1000) + "," \
-                          + str(math.degrees(sat_objs[src]["sat_obj"].sublong)) + "," \
-                          + str(math.degrees(sat_objs[src]["sat_obj"].sublat)) + "," \
-                          + str(sat_objs[src]["alt_km"] * 1000) + "]), " \
-                          + "width: 3.0, arcType: Cesium.ArcType.NONE, " \
-                          + "material: new Cesium.PolylineOutlineMaterialProperty({ " \
-                          + "color: Cesium.Color.RED.withAlpha(1.0), outlineWidth: 0, outlineColor: Cesium.Color.BLACK})}});"
-        if 0 < p < len(SEL_PATH) - 2:
-            #print(SEL_PATH[p], SEL_PATH[p+1])
-            src = int(SEL_PATH[p])
-            dst = int(SEL_PATH[p+1])
-            viz_string += "viewer.entities.add({name : '', polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights(["\
-                          + str(math.degrees(sat_objs[src]["sat_obj"].sublong)) + ","\
-                          + str(math.degrees(sat_objs[src]["sat_obj"].sublat)) + ","+str(sat_objs[src]["alt_km"]*1000)+","\
-                          + str(math.degrees(sat_objs[dst]["sat_obj"].sublong)) + ","\
-                          + str(math.degrees(sat_objs[dst]["sat_obj"].sublat)) + ","+str(sat_objs[dst]["alt_km"]*1000)+"]), "\
-                          + "width: 3.0, arcType: Cesium.ArcType.NONE, "\
-                          + "material: new Cesium.PolylineOutlineMaterialProperty({ "\
-                          + "color: Cesium.Color.RED.withAlpha(1.0), outlineWidth: 0, outlineColor: Cesium.Color.BLACK})}});"
-
+    src_gs_id = sel_path[0] - num_sats
+    dst_gs_id = sel_path[-1] - num_sats
+    OUT_HTML_FILE += "_" + city_details[src_gs_id]["name"] + "_" + str(sel_path[0])
+    OUT_HTML_FILE += "_" + city_details[dst_gs_id]["name"] + "_" + str(sel_path[-1])
     OUT_HTML_FILE += "_" + str(GEN_TIME) + ".html"
-    return viz_string
+
+    sat_init, sat_meta = _satellite_js_payload()
+
+    # Include every ground-station node that appears in any path event.
+    gs_nodes_in_schedule = {}
+    for _, nodes in paths_over_time:
+        for node in nodes:
+            if node >= num_sats:
+                gid = node - num_sats
+                gs_nodes_in_schedule[str(node)] = {
+                    "lon_deg": float(city_details[gid]["long_deg"]),
+                    "lat_deg": float(city_details[gid]["lat_deg"]),
+                    "alt_m": float(city_details[gid]["alt_km"]) * 1000.0
+                }
+
+    path_schedule_payload = [{"start_ms": t, "nodes": nodes} for t, nodes in paths_over_time]
+
+    viz_parts.append("const SAT_EPOCH = Cesium.JulianDate.fromIso8601('2000-01-01T00:00:00Z');\n")
+    viz_parts.append("function jdFromMs(ms) { return Cesium.JulianDate.addSeconds(SAT_EPOCH, ms / 1000.0, new Cesium.JulianDate()); }\n")
+    viz_parts.append("viewer.clock.startTime = jdFromMs(" + str(sim_start_ms) + ");\n")
+    viz_parts.append("viewer.clock.currentTime = jdFromMs(" + str(GEN_TIME) + ");\n")
+    viz_parts.append("viewer.clock.stopTime = jdFromMs(" + str(sim_end_ms) + ");\n")
+    viz_parts.append("viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;\n")
+    viz_parts.append("viewer.clock.multiplier = 60;\n")
+    viz_parts.append("if (viewer.timeline) { viewer.timeline.zoomTo(viewer.clock.startTime, viewer.clock.stopTime); }\n")
+
+    viz_parts.append("const NUM_SATS = " + str(num_sats) + ";\n")
+    viz_parts.append("const EARTH_RADIUS_M = 6378135.0;\n")
+    viz_parts.append("const SAT_INIT = " + json.dumps(sat_init, separators=(",", ":")) + ";\n")
+    viz_parts.append("const SAT_META = " + json.dumps(sat_meta, separators=(",", ":")) + ";\n")
+    viz_parts.append("const PATH_SCHEDULE = " + json.dumps(path_schedule_payload, separators=(",", ":")) + ";\n")
+    viz_parts.append("const GS_NODE_POS = " + json.dumps(gs_nodes_in_schedule, separators=(",", ":")) + ";\n")
+
+    viz_parts.append("""
+const _eciScratch = new Cesium.Cartesian3();
+function satPositionAtTime(satId, time, result) {
+    const meta = SAT_META[satId];
+    const elapsedSec = Cesium.JulianDate.secondsDifference(time, SAT_EPOCH);
+    const raan = Cesium.Math.toRadians(meta.raan_deg);
+    const inc = Cesium.Math.toRadians(meta.inc_deg);
+    const meanMotion = meta.mean_motion_rev_per_day * Cesium.Math.TWO_PI / 86400.0;
+    const u = Cesium.Math.toRadians(meta.m0_deg) + (meanMotion * elapsedSec);
+    const r = EARTH_RADIUS_M + meta.alt_m;
+
+    const cosU = Math.cos(u);
+    const sinU = Math.sin(u);
+    const cosRaan = Math.cos(raan);
+    const sinRaan = Math.sin(raan);
+    const cosInc = Math.cos(inc);
+    const sinInc = Math.sin(inc);
+
+    _eciScratch.x = r * (cosRaan * cosU - sinRaan * sinU * cosInc);
+    _eciScratch.y = r * (sinRaan * cosU + cosRaan * sinU * cosInc);
+    _eciScratch.z = r * (sinU * sinInc);
+
+    let m = Cesium.Transforms.computeIcrfToFixedMatrix(time);
+    if (!Cesium.defined(m)) {
+        m = Cesium.Transforms.computeTemeToPseudoFixedMatrix(time);
+    }
+    if (Cesium.defined(m)) {
+        return Cesium.Matrix3.multiplyByVector(m, _eciScratch, result || new Cesium.Cartesian3());
+    }
+    return Cesium.Cartesian3.clone(_eciScratch, result || new Cesium.Cartesian3());
+}
+
+function activePathNodes(elapsedMs) {
+    let sel = PATH_SCHEDULE[0].nodes;
+    for (let i = 1; i < PATH_SCHEDULE.length; i++) {
+        if (elapsedMs < PATH_SCHEDULE[i].start_ms) {
+            break;
+        }
+        sel = PATH_SCHEDULE[i].nodes;
+    }
+    return sel;
+}
+
+const satEntities = new Array(NUM_SATS);
+for (let sid = 0; sid < NUM_SATS; sid++) {
+    const init = SAT_INIT[sid];
+    const satEntity = viewer.entities.add({
+        name: '',
+        position: Cesium.Cartesian3.fromDegrees(init.lon_deg, init.lat_deg, init.alt_m),
+        ellipsoid: {
+            radii: new Cesium.Cartesian3(20000.0, 20000.0, 20000.0),
+            material: Cesium.Color.BLACK.withAlpha(1.0)
+        }
+    });
+    satEntity.position = new Cesium.CallbackProperty(function(time, result) {
+        return satPositionAtTime(sid, time, result);
+    }, false);
+    satEntities[sid] = satEntity;
+}
+
+Object.keys(GS_NODE_POS).forEach(function(nodeId) {
+    const gs = GS_NODE_POS[nodeId];
+    viewer.entities.add({
+        name: '',
+        position: Cesium.Cartesian3.fromDegrees(gs.lon_deg, gs.lat_deg, gs.alt_m),
+        ellipsoid: {
+            radii: new Cesium.Cartesian3(50000.0, 50000.0, 50000.0),
+            material: Cesium.Color.GREEN.withAlpha(1.0)
+        }
+    });
+});
+
+viewer.entities.add({
+    name: '',
+    polyline: {
+        positions: new Cesium.CallbackProperty(function(time, result) {
+            const elapsedMs = Cesium.JulianDate.secondsDifference(time, SAT_EPOCH) * 1000.0;
+            const nodes = activePathNodes(elapsedMs);
+            const positions = [];
+            for (let i = 0; i < nodes.length; i++) {
+                const nodeId = nodes[i];
+                if (nodeId >= NUM_SATS) {
+                    const gs = GS_NODE_POS[String(nodeId)];
+                    if (gs) {
+                        positions.push(Cesium.Cartesian3.fromDegrees(gs.lon_deg, gs.lat_deg, gs.alt_m));
+                    }
+                } else {
+                    positions.push(satPositionAtTime(nodeId, time));
+                }
+            }
+            return positions;
+        }, false),
+        width: 3.0,
+        arcType: Cesium.ArcType.NONE,
+        material: new Cesium.PolylineOutlineMaterialProperty({
+            color: Cesium.Color.RED.withAlpha(1.0),
+            outlineWidth: 0,
+            outlineColor: Cesium.Color.BLACK
+        })
+    }
+});
+""")
+
+    return "".join(viz_parts)
 
 
 city_details = util.read_city_details(city_details, city_detail_file)

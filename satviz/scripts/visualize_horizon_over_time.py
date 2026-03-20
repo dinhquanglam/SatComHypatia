@@ -224,8 +224,10 @@ def generate_sat_obj_list():
 # LOCATION = (59.9139, 10.7522)  # Oslo
 # LOCATION = (-33.4489, -70.6693)  # Santiago
 # LOCATION = (-47.0478056, 149.1647065)  # Christchurch
+#LOCATION = (59.9311, 30.3609)  # Saint Petersburg
+#LOCATION = (21.0245, 105.84117)  # Hanoi
 
-LOCATION = (59.9311, 30.3609)  # Saint Petersburg
+LOCATION = (10.75, 106.66667)  # Ho Chi Minh City
 
 VIZ_TIME = 170  # Total time of visualization in seconds
 VIZ_GRAN = 5  # Granularity of visualization in seconds
@@ -256,6 +258,7 @@ for sec in range(0, VIZ_TIME, VIZ_GRAN):
     plt.show()
     plt.pause(0.1)
     #plt.savefig('OUTPUT_FOLDER/horizon_'+str(cntr)+'.png')
+    plt.savefig('../viz_output/horizon/horizon_' + str(cntr) + '.png', dpi=200)
     cntr += 1
 
 # If images are saved in an output folder (use plt.savefig above), run the below command (ffmpeg) to generate video.

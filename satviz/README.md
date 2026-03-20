@@ -18,6 +18,17 @@ a Cesium access token (via [https://cesium.com/]()).
 
 3. Now you are able to make use of the scripts in `scripts/`
 
+## View generated HTML reliably
+
+If `python3 -m http.server` intermittently fails with `OSError: [Errno 35] Resource deadlock avoided`, use:
+
+```bash
+python3 satviz/scripts/serve_satviz.py --open-browser
+```
+
+By default this serves the `satviz` directory on `127.0.0.1:8081` and opens:
+`http://127.0.0.1:8081/viz_output/Starlink.html`
+
 
 ## Script description
 

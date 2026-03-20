@@ -101,7 +101,7 @@ BASE_ID[4] = 3959
 ORB_WISE_IDS[4] = []
 
 
-"""
+
 # TELESAT
 NAME = "Telesat"
 SHELL_CNTR = 2
@@ -129,7 +129,7 @@ NUM_SATS_PER_ORB[1] = 33
 INCLINATION_DEGREE[1] = 50.88
 BASE_ID[1] = 351
 ORB_WISE_IDS[1] = []
-"""
+
 
 """
 # KUIPER
