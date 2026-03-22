@@ -1,0 +1,32 @@
+{
+  "protocol": "tcp",
+  "summary": [
+    {
+      "k": "k=1",
+      "runs_count": 1,
+      "mean_flow_throughput_mbps": 1.6627359980000003,
+      "mean_total_goodput_mbps": 166.27359980000003,
+      "paper_table_throughput_mbps": 2.47,
+      "delta_vs_paper_abs_mbps": -0.8072640019999999,
+      "delta_vs_paper_pct": -32.6827531174089
+    },
+    {
+      "k": "k=3",
+      "runs_count": 1,
+      "mean_flow_throughput_mbps": 1.7222813959999999,
+      "mean_total_goodput_mbps": 172.2281396,
+      "paper_table_throughput_mbps": 2.65,
+      "delta_vs_paper_abs_mbps": -0.9277186040000001,
+      "delta_vs_paper_pct": -35.00824920754717
+    },
+    {
+      "k": "k=5",
+      "runs_count": 1,
+      "mean_flow_throughput_mbps": 1.756977475333334,
+      "mean_total_goodput_mbps": 175.6977475333334,
+      "paper_table_throughput_mbps": 2.92,
+      "delta_vs_paper_abs_mbps": -1.163022524666666,
+      "delta_vs_paper_pct": -39.82953851598171
+    }
+  ]
+}
